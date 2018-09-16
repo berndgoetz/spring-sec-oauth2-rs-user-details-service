@@ -1,0 +1,95 @@
+spring:
+  application:
+    name: pcss-authdemo
+server:
+  port: ${port:8082}
+  # enables reverse proxy with x-forwarded-* headers
+#  use-forward-headers: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: '*'
+
+# PingFederate
+#security:
+#  oauth2:
+#    client:
+#      clientId: xxx
+#      userAuthorizationUri: https://ping-idp/as/authorization.oauth2
+#      accessTokenUri: https://ping-idp/as/token.oauth2
+#    resource:
+#      user-info-uri: https://ping-idp/idp/userinfo.openid
+
+# Okta:
+security:
+  oauth2:
+    client:
+      client-id: xxx
+      client-secret: yyy
+      access-token-uri: https://dev-abcdef.oktapreview.com/oauth2/default/v1/token
+      user-authorization-uri: https://dev-abcdef.oktapreview.com/oauth2/default/v1/authorize
+      scope: openid profile email
+    resource:
+      user-info-uri: https://dev-abcdef.oktapreview.com/oauth2/default/v1/userinfo
+      token-info-uri: https://dev-abcdef.oktapreview.com/oauth2/default/v1/introspect
+      prefer-token-info: false
+      jwk:
+        key-set-uri: https://dev-abcdef.oktapreview.com/oauth2/default/v1/keys
+
+logging:
+  level:
+    com.swissre.pcss.web: info  # set to debug if you want to see headers and body content
+    org.hibernate: # set to trace to log sql statements and bindings
+      type.descriptor.sql: info
+      SQL: info
+    org.springframework: info
+    org.springframework.security: debug
+    org.springframework.boot.autoconfigure.security: info
+    org.springframework.web.client: info
+
+app:
+  pingFederateKeyUrl: https://int-idp-dev.swissre.com:9031/ext/oauth/x509/kid
+  enable-ssl: false
+  stage: default
+
+---
+
+spring:
+  profile: default
+app:
+  enable-ssl: false
+
+---
+
+spring:
+  profiles: cloud
+server:
+  ssl:
+    enabled: false
+
+---
+
+spring:
+  profiles: dev
+server:
+  debug: true
+app:
+  stage: dev
+  enable-ssl: false
+
+---
+
+spring:
+  profiles: test
+app:
+  stage: integration testing
+  enable-ssl: true
+
+---
+
+spring:
+  profiles: prod
+app:
+  stage: production
+  enable-ssl: true

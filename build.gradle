@@ -1,0 +1,182 @@
+buildscript {
+    ext {
+        springBootVersion = '2.0.5.RELEASE'
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+    }
+}
+
+plugins {
+    id 'io.franzbecker.gradle-lombok' version '1.14'
+}
+
+apply plugin: 'java'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'war'
+// apply plugin: 'maven'
+
+group = 'pcss'
+version = '0.2.0'
+sourceCompatibility = 1.8
+
+tasks.withType(JavaCompile) {
+    options.encoding = 'UTF-8'
+}
+
+ext {
+    springCloudVersion = 'Finchley.RELEASE'
+    isCloud = System.properties['cloud'] == 'true'
+    isWls = System.properties['wls'] == 'true'
+    env = System.properties['env']
+    if (isWls) {
+        assemblySource = 'src/assembly/mac'
+    } else {
+        assemblySource = 'src/assembly/nac'
+    }
+}
+
+dependencies {
+    compile('org.springframework.boot:spring-boot-starter-web')
+    compile('org.springframework.boot:spring-boot-starter-actuator')
+    compile('org.springframework.boot:spring-boot-starter-thymeleaf')
+    compile('org.springframework.boot:spring-boot-starter-cache')
+    compile('org.springframework.data:spring-data-rest-hal-browser')
+    runtime('net.logstash.logback:logstash-logback-encoder:4.11')
+    compile('org.springframework.boot:spring-boot-starter-security')
+    compile('org.springframework.security.oauth.boot:spring-security-oauth2-autoconfigure:2.0.5.RELEASE')
+    compile('io.jsonwebtoken:jjwt:0.9.0')
+    compile('org.webjars:bootstrap:3.3.4')
+    compile('org.webjars:webjars-locator:0.30')
+    compile('io.springfox:springfox-swagger2:2.9.2')
+    compile('io.springfox:springfox-swagger-ui:2.9.2')
+    annotationProcessor "org.springframework.boot:spring-boot-configuration-processor"
+//    compileOnly('org.projectlombok:lombok')
+//    annotationProcessor 'org.projectlombok'
+    runtime('org.springframework.boot:spring-boot-devtools')
+    compile('org.springframework.cloud:spring-cloud-starter')
+    if (isCloud) {
+        runtime('org.springframework.cloud:spring-cloud-starter-sleuth')
+    }
+    if (isWls) {
+        providedRuntime 'org.springframework.boot:spring-boot-starter-tomcat'
+    }
+    testCompile('org.springframework.boot:spring-boot-starter-test') {
+        exclude(module: 'commons-logging')
+    }
+    testCompile('org.springframework.security:spring-security-test')
+    testCompile('com.google.guava:guava-testlib:20.0')
+}
+
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
+configurations {
+    implementation {
+        exclude group: 'org.apache.logging.log4j'
+    }
+}
+
+bootJar {
+    enabled = true
+    archiveName = 'app.jar'
+}
+
+bootWar {
+    enabled = true
+    archiveName = 'app.war'
+    webXml = file('src/assembly/mac/web.xml')
+}
+
+task createTransferZip(type: Zip) {
+    dependsOn 'bootWar'
+    dependsOn 'bootJar'
+    archiveName 'transfer.zip'
+    destinationDir file('build')
+    from(assemblySource) {
+        include 'manifest.yml'
+        include 'deploy.yml'
+        into 'src/assembly'
+    }
+    from('src/assembly/profiles') {
+        into 'src/assembly/profiles'
+    }
+    // for Flyway execution during deployment
+    from('src/main/resources/db/migration') {
+        into 'src/main/resources/db/migration'
+    }
+    // WLS: war file and server.xml
+    from(assemblySource) {
+        include 'server.xml'
+        into 'app'
+    }
+    if (isWls) {
+        from('build/libs/') {
+            include 'app.war'
+            into 'app/apps'
+        }
+    } else {
+        from('build/libs/') {
+            include 'app.jar'
+            into 'app/apps'
+        }
+
+    }
+}
+
+//for Ant filter
+import org.apache.tools.ant.filters.ReplaceTokens
+
+task profileForEnvironment {
+    doLast {
+        ant.unzip(src: 'build/transfer.zip', dest: 'build/extracted')
+        def myProps = new Properties()
+        file('build/extracted/src/assembly/profiles/' + env + '.properties').withInputStream {
+            myProps.load(it);
+        }
+        // MAC mas deployment
+        copy {
+            from 'build/extracted/app'
+            include '**'
+            into 'build/deployment-zip/app'
+        }
+        copy {
+            from 'build/extracted/src/assembly/manifest.yml'
+            into 'build/deployment-zip'
+            filter(ReplaceTokens, tokens: myProps)
+        }
+        ant.zip(baseDir: 'build/deployment-zip', destFile: 'build/deployment.zip')
+        copy {
+            from 'build/extracted/src/assembly/deploy.yml'
+            into 'build'
+            filter(ReplaceTokens, tokens: myProps)
+        }
+        // NAC CF deployment
+        copy {
+            from 'build/extracted/src/assembly/manifest.yml'
+            into 'build'
+            filter(ReplaceTokens, tokens: myProps)
+        }
+    }
+}
+
+// required for Bamboo version extraction
+task createPom {
+    doLast {
+        pom {
+            project {
+            }
+        }.writeTo("build/pom.xml")
+    }
+}
+
+springBoot {
+    // This statement tells the Gradle Spring Boot plugin to generate a file
+    // build/resources/main/META-INF/build-info.properties that is picked up by Spring Boot to display via /info
+    // endpoint.
+    buildInfo()
+}
